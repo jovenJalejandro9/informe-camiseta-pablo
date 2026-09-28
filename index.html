@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Camiseta · Charla de Pablo</title>
+<style>
+  :root { --bg: #f5f5f7; --card: #ffffff; --txt: #1d1d1f; --dim: #6e6e73; --line: #d2d2d7; --azul: #0071e3; --azul-suave: #e8f1fd; --error: #d70015;
+    --f: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #000; --card: #1c1c1e; --txt: #f5f5f7; --dim: #a1a1a6; --line: #38383a;
+    --azul: #0a84ff; --azul-suave: #0a2a4d; --error: #ff6961; color-scheme: dark; } }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--txt); font: 15px/1.45 var(--f); -webkit-font-smoothing: antialiased;
+    display: grid; place-items: center; padding-inline: 16px; }
+  form { width: min(380px, 100%); background: var(--card); border-radius: 18px; padding: 32px 28px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 8px 28px rgba(0,0,0,.08); display: grid; gap: 14px; }
+  h1 { margin: 0; font: 600 22px/1.2 -apple-system, "SF Pro Display", sans-serif; letter-spacing: -.02em; }
+  p { margin: 0; color: var(--dim); font-size: 14px; }
+  input { font: 500 20px var(--f); letter-spacing: .2em; text-align: center; padding: 12px; border-radius: 12px;
+    border: 1px solid var(--line); background: var(--card); color: var(--txt); }
+  input:focus { outline: none; border-color: var(--azul); box-shadow: 0 0 0 4px var(--azul-suave); }
+  button { font: 600 16px var(--f); padding: 12px; border-radius: 999px; border: none; background: var(--azul); color: #fff; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  .estado { min-height: 1.4em; font-size: 13px; color: var(--dim); text-align: center; }
+  .estado.mal { color: var(--error); }
+</style>
+</head>
+<body>
+<form id="puerta">
+  <h1>Fallos de la camiseta · Charla de Pablo</h1>
+  <p>Informe de imagen para el editor. Introduce la contraseña para verlo.</p>
+  <input id="pw" type="password" inputmode="numeric" autocomplete="current-password" aria-label="Contraseña" autofocus>
+  <button id="entrar" type="submit">Ver el informe</button>
+  <div class="estado" id="estado" role="status"></div>
+</form>
+<script>
+(() => {   // en un bloque: la página descifrada declara sus propias constantes globales
+// La página y sus clips/fotogramas van cifrados (AES-256-GCM, clave PBKDF2-SHA256).
+const bajar = (f) => fetch(f, { cache: "no-store" }).then((r) => { if (!r.ok) throw new Error(f); return r.arrayBuffer(); });
+const indice = fetch("datos/indice.json", { cache: "no-store" }).then((r) => r.json());
+const ficheros = { sal: indice, pagina: bajar("datos/pagina.enc") };
+const $ = (s) => document.getElementById(s);
+const guardada = () => { try { return localStorage.getItem("camiseta-pablo.pw"); } catch { return null; } };
+const guardar = (v) => { try { localStorage.setItem("camiseta-pablo.pw", v); } catch {} };
+
+async function clave(pw) {
+  const { sal, iter } = await ficheros.sal;
+  const s = new Uint8Array(sal.match(/../g).map((h) => parseInt(h, 16)));
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({ name: "PBKDF2", salt: s, iterations: iter, hash: "SHA-256" }, base,
+    { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+}
+async function descifrar(k, buf) {
+  const b = new Uint8Array(await buf);
+  return crypto.subtle.decrypt({ name: "AES-GCM", iv: b.slice(0, 12) }, k, b.slice(12));
+}
+async function abrir(pw) {
+  const k = await clave(pw);
+  let pagina = new TextDecoder().decode(await descifrar(k, ficheros.pagina));   // falla aquí si la contraseña no vale
+  $("estado").className = "estado"; $("estado").textContent = "Cargando los vídeos…";
+  const { recursos } = await indice;
+  const urls = await Promise.all(recursos.map(async (r) =>
+    URL.createObjectURL(new Blob([await descifrar(k, bajar(r.fichero))], { type: r.tipo }))));
+  recursos.forEach((r, i) => { pagina = pagina.split(`"${r.nombre}"`).join(`"${urls[i]}"`); });
+  document.open(); document.write(pagina); document.close();
+}
+async function probar(pw, recordar) {
+  $("entrar").disabled = true; $("estado").className = "estado"; $("estado").textContent = "Comprobando…";
+  try { await abrir(pw); if (recordar) guardar(pw); return true; }
+  catch (e) {
+    $("entrar").disabled = false;
+    $("estado").className = "estado mal";
+    $("estado").textContent = e instanceof DOMException && e.name === "OperationError"
+      ? "Contraseña incorrecta. Vuelve a probar." : "No se ha podido cargar el informe. Revisa la conexión y recarga.";
+    return false;
+  }
+}
+$("puerta").addEventListener("submit", (e) => { e.preventDefault(); probar($("pw").value.trim(), true); });
+const pw = guardada(); if (pw) probar(pw, false).then((ok) => { if (!ok) $("estado").textContent = ""; });
+})();
+</script>
+</body>
+</html>
